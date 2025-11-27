@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">SpamBlocker</string>
+    <string name="this_app_blocks_calls_labeled_as_spam_risk_or_similar_by_your_carrier">This app blocks calls labeled as \'Spam Risk\' or similar by your carrier.</string>
+    <string name="spam_blocking">Spam Blocking</string>
+    <string name="setup_call_screening">Setup Call Screening</string>
+    <string name="setup_required">Setup Required</string>
+    <string name="view_blocked_calls">View Blocked Calls</string>
+
+<!-- res/values/strings.xml -->
+    <string name="spam_blocking_explanation">This app blocks calls labeled as Spam Risk or similar
+        by your carrier.
+    </string>
+</resources>
