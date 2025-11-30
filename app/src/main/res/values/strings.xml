@@ -5,9 +5,20 @@
     <string name="setup_call_screening">Setup Call Screening</string>
     <string name="setup_required">Setup Required</string>
     <string name="view_blocked_calls">View Blocked Calls</string>
+    <string name="blocking_active">✓ Spam blocking is active</string>
+    <string name="blocking_paused">Spam blocking is paused</string>
+    <string name="setup_required_text">⚠ Setup required</string>
+    <string name="no_blocked_calls">No blocked calls yet</string>
+    <string name="call_screening_enabled">✓ Call screening is enabled!</string>
+    <string name="already_default_screening">App is already the default call screening app</string>
+    <string name="screening_not_available">Call screening not available on this device</string>
+    <string name="screening_requires_android10">Call screening requires Android 10+</string>
+    <string name="permissions_granted">Permissions granted! Now enabling call screening…</string>
+    <string name="permissions_required">Permissions required for call screening</string>
 
 <!-- res/values/strings.xml -->
     <string name="spam_blocking_explanation">This app blocks calls labeled as Spam Risk or similar
         by your carrier.
     </string>
+    <string name="check_blocking_status">Check Blocking Status</string>
 </resources>

@@ -1,35 +1,65 @@
 package com.spamblocker
 
 import android.Manifest
-import android.content.Context
-import android.content.Intent
+import android.app.role.RoleManager
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_PERMISSION = 1
-        private const val REQUEST_SCREENING_ROLE = 2
+        private const val TAG = "MainActivity"
+        private const val PREF_ROLE_REQUESTED = "role_requested"
     }
 
     private lateinit var statusText: TextView
     private lateinit var enableSwitch: SwitchCompat
     private lateinit var setupButton: Button
     private lateinit var viewLogsButton: Button
+    private lateinit var roleManager: RoleManager
+
+    // Replace deprecated startActivityForResult with new API
+    private val roleRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            Log.e(TAG, "User granted call screening role!")
+            markRoleRequested()
+            updateUIForRoleGranted()
+            Toast.makeText(this, "Call screening activated! Spam blocking is now active.", Toast.LENGTH_LONG).show()
+        } else {
+            Log.e(TAG, "User denied call screening role")
+            Toast.makeText(this,
+                "Call screening not enabled. You can enable it later in:\n" +
+                        "Phone app → Settings → Call blocking & identification",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        updateStatus()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Initialize RoleManager if available
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            roleManager = getSystemService(RoleManager::class.java)
+        }
 
         statusText = findViewById(R.id.statusText)
         enableSwitch = findViewById(R.id.enableSwitch)
@@ -44,15 +74,119 @@ class MainActivity : AppCompatActivity() {
             showBlockedCallsLog()
         }
 
+        // Check current status on app start and auto-request role if needed
+        checkCurrentStatus()
+        autoRequestRoleIfNeeded()
         updateStatus()
     }
 
+    // NEW METHOD: Automatically request role if we don't have it and haven't asked recently
+    private fun autoRequestRoleIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val hasRole = roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+            val hasRequestedBefore = getSharedPreferences("settings", MODE_PRIVATE)
+                .getBoolean(PREF_ROLE_REQUESTED, false)
+
+            if (!hasRole && !hasRequestedBefore && roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
+                Log.e(TAG, "Auto-requesting call screening role on first launch")
+                // Small delay to let UI settle
+                statusText.postDelayed({
+                    requestScreeningRole()
+                }, 1000)
+            }
+        }
+    }
+
+    // NEW METHOD: Mark that we've requested the role (to avoid spamming user)
+    private fun markRoleRequested() {
+        getSharedPreferences("settings", MODE_PRIVATE).edit {
+            putBoolean(PREF_ROLE_REQUESTED, true)
+        }
+    }
+
+    // UPDATED METHOD: Check detailed call screening status with UI update
+    private fun checkCurrentStatus() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val isRoleHeld = roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
+                Log.e(TAG, "Call screening role held: $isRoleHeld")
+
+                if (isRoleHeld) {
+                    Log.e(TAG, "SUCCESS: We have call screening role!")
+                    updateUIForRoleGranted()
+                } else {
+                    Log.e(TAG, "Call screening role not held - need user permission")
+                    updateUIForRoleMissing()
+                }
+            } else {
+                Log.e(TAG, "Call screening requires Android 10+")
+                updateUIForUnsupportedAndroid()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking status: ${e.message}")
+        }
+    }
+
+    // NEW METHOD: Update UI when role is granted
+    private fun updateUIForRoleGranted() {
+        runOnUiThread {
+            statusText.text = getString(R.string.call_screening_enabled)
+            statusText.setTextColor(Color.GREEN)
+
+            // Enable the blocking switch
+            enableSwitch.isEnabled = true
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            val isBlockingEnabled = prefs.getBoolean("blocking_enabled", true)
+
+            enableSwitch.setOnCheckedChangeListener(null)
+            enableSwitch.isChecked = isBlockingEnabled
+            enableSwitch.setOnCheckedChangeListener { _, isChecked ->
+                getSharedPreferences("settings", MODE_PRIVATE).edit {
+                    putBoolean("blocking_enabled", isChecked)
+                }
+                updateStatusText(isChecked)
+                Log.e(TAG, "Blocking enabled: $isChecked")
+            }
+
+            updateStatusText(isBlockingEnabled)
+            setupButton.visibility = View.GONE
+        }
+    }
+
+    // NEW METHOD: Update UI when role is missing
+    private fun updateUIForRoleMissing() {
+        runOnUiThread {
+            statusText.text = getString(R.string.setup_required_text)
+            statusText.setTextColor(Color.RED)
+            enableSwitch.isEnabled = false
+            enableSwitch.isChecked = false
+            setupButton.visibility = View.VISIBLE
+        }
+    }
+
+    // NEW METHOD: Update UI for unsupported Android version
+    private fun updateUIForUnsupportedAndroid() {
+        runOnUiThread {
+            statusText.text = getString(R.string.screening_requires_android10)
+            statusText.setTextColor(Color.GRAY)
+            enableSwitch.isEnabled = false
+            enableSwitch.isChecked = false
+            setupButton.visibility = View.VISIBLE
+            setupButton.isEnabled = false
+        }
+    }
+
     private fun requestPermissionsAndRole() {
-        val permissions = mutableListOf(
-            Manifest.permission.ANSWER_PHONE_CALLS,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_CALL_LOG
-        )
+        val permissions = mutableListOf<String>()
+
+        // Add basic permissions that are always available
+        permissions.add(Manifest.permission.READ_PHONE_STATE)
+        permissions.add(Manifest.permission.READ_CALL_LOG)
+
+        // Only add ANSWER_PHONE_CALLS on API 26+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            permissions.add(Manifest.permission.ANSWER_PHONE_CALLS)
+        }
 
         val permissionsToRequest = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -71,22 +205,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestScreeningRole() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(android.app.role.RoleManager::class.java)
-            
-            if (roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)) {
-                Toast.makeText(this, "App is already the default call screening app", Toast.LENGTH_SHORT).show()
-                updateStatus()
+            if (roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
+                Toast.makeText(this, getString(R.string.already_default_screening), Toast.LENGTH_SHORT).show()
+                updateUIForRoleGranted()
                 return
             }
 
-            if (roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING)) {
+            if (roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
                 val roleIntent = roleManager.createRequestRoleIntent(
-                    android.app.role.RoleManager.ROLE_CALL_SCREENING
+                    RoleManager.ROLE_CALL_SCREENING
                 )
-                startActivityForResult(roleIntent, REQUEST_SCREENING_ROLE)
+
+                roleRequestLauncher.launch(roleIntent)
+                Log.e(TAG, "Starting role request intent")
             } else {
-                Toast.makeText(this, "Call screening not available on this device", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.screening_not_available), Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Call screening role not available")
             }
+        } else {
+            Toast.makeText(this, getString(R.string.screening_requires_android10), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -99,80 +236,67 @@ class MainActivity : AppCompatActivity() {
 
         if (requestCode == REQUEST_PERMISSION) {
             if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                Toast.makeText(this, getString(R.string.permissions_granted), Toast.LENGTH_SHORT).show()
                 requestScreeningRole()
             } else {
-                Toast.makeText(this, "Permissions required for call screening", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.permissions_required), Toast.LENGTH_LONG).show()
+                Log.e(TAG, "User denied required permissions")
             }
         }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        if (requestCode == REQUEST_SCREENING_ROLE) {
-            updateStatus()
-        }
+    override fun onResume() {
+        super.onResume()
+        // Check role status when app comes to foreground
+        checkCurrentStatus()
     }
 
     private fun updateStatus() {
         val hasPermissions = checkPermissions()
         val isRoleHeld = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(android.app.role.RoleManager::class.java)
-            roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)
+            roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
         } else {
-            true
+            false
         }
 
         val isSetupComplete = hasPermissions && isRoleHeld
 
         if (isSetupComplete) {
-            // Setup is done: hide the setup button
-            setupButton.visibility = View.GONE
-            
-            // Enable the switch and set its state
-            enableSwitch.isEnabled = true
-            
-            val prefs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-            val isBlockingEnabled = prefs.getBoolean("blocking_enabled", true)
-            
-            // Set listener only after setting state to avoid double-trigger
-            enableSwitch.setOnCheckedChangeListener(null)
-            enableSwitch.isChecked = isBlockingEnabled
-            enableSwitch.setOnCheckedChangeListener { _, isChecked ->
-                val editor = getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
-                editor.putBoolean("blocking_enabled", isChecked)
-                editor.apply()
-                updateStatusText(isChecked)
-            }
-            
-            updateStatusText(isBlockingEnabled)
+            updateUIForRoleGranted()
         } else {
-            // Setup required
-            statusText.text = "⚠ Setup required"
-            setupButton.visibility = View.VISIBLE
-            setupButton.isEnabled = true
-            setupButton.text = "Setup Call Screening"
-            
-            enableSwitch.isEnabled = false
-            enableSwitch.isChecked = false
+            updateUIForRoleMissing()
+
+            // Show what's missing
+            if (!hasPermissions) {
+                Log.e(TAG, "Status: Missing permissions")
+            }
+            if (!isRoleHeld) {
+                Log.e(TAG, "Status: Call screening role not held")
+            }
         }
     }
 
     private fun updateStatusText(isEnabled: Boolean) {
         if (isEnabled) {
-            statusText.text = "✓ Spam blocking is active"
+            statusText.text = getString(R.string.blocking_active)
+            statusText.setTextColor(ContextCompat.getColor(this, android.R.color.white))
         } else {
-            statusText.text = "Spam blocking is paused"
+            statusText.text = getString(R.string.blocking_paused)
+            statusText.setTextColor(ContextCompat.getColor(this, android.R.color.white))
         }
     }
 
     private fun checkPermissions(): Boolean {
-        val requiredPermissions = listOf(
-            Manifest.permission.ANSWER_PHONE_CALLS,
+        val requiredPermissions = mutableListOf(
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CALL_LOG
         )
-        
+
+        // Only require ANSWER_PHONE_CALLS on API 26+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            requiredPermissions.add(Manifest.permission.ANSWER_PHONE_CALLS)
+        }
+
         return requiredPermissions.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
@@ -183,7 +307,7 @@ class MainActivity : AppCompatActivity() {
         val logs = prefs.getStringSet("logs", setOf()) ?: setOf()
 
         if (logs.isEmpty()) {
-            Toast.makeText(this, "No blocked calls yet", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.no_blocked_calls), Toast.LENGTH_SHORT).show()
         } else {
             val logText = logs.joinToString("\n") { log ->
                 val parts = log.split("|")

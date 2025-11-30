@@ -21,23 +21,25 @@
         android:id="@+id/enableSwitch"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/spam_blocking"
+        android:layout_marginBottom="32dp"
         android:enabled="false"
-        android:layout_marginBottom="32dp" />
+        android:minHeight="48dp"
+        android:text="@string/spam_blocking" />
 
     <Button
         android:id="@+id/setupButton"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/setup_call_screening"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="16dp"
+        android:layout_gravity="center_horizontal" />
 
     <Button
         android:id="@+id/viewLogsButton"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/view_blocked_calls" />
-
+        android:text="@string/view_blocked_calls"
+        android:layout_gravity="center_horizontal" />
 
     <TextView
         android:layout_width="match_parent"
