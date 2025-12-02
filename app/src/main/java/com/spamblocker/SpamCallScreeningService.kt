@@ -11,12 +11,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.spamblocker.data.AppDatabase
 import com.spamblocker.data.BlockedCall
-import kotlin.getValue
 
 class SpamCallScreeningService : CallScreeningService() {
 
     companion object {
         private const val TAG = "SpamCallScreening"
+        const val PREFS_NAME = "spam_blocker_prefs"
+        const val KEY_BLOCKING_ENABLED = "blocking_enabled"
 
         // Common carrier spam labels to detect
         private val SPAM_KEYWORDS = listOf(
@@ -40,25 +41,37 @@ class SpamCallScreeningService : CallScreeningService() {
         Log.e(TAG, "=== CALL SCREENING SERVICE TRIGGERED ===")
         Log.e(TAG, "Screening call from: ${callDetails.handle}")
 
+        // Check if blocking is enabled by user settings
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val isBlockingEnabled = prefs.getBoolean(KEY_BLOCKING_ENABLED, true) // Default TRUE
+
+        Log.e(TAG, "Blocking enabled status: $isBlockingEnabled")
+
+        if (!isBlockingEnabled) {
+            Log.e(TAG, "Blocking is disabled in settings. Allowing call.")
+            // Show toast to indicate service is running but blocking is off
+            try {
+                Toast.makeText(
+                    applicationContext,
+                    "Spam blocker: OFF (call allowed)",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Toast error: ${e.message}")
+            }
+            allowCall(callDetails)
+            return
+        }
+
         // Show toast for debugging (you'll see this on screen)
         try {
             Toast.makeText(
                 applicationContext,
-                "Call screening activated!",
+                "Spam blocker: Screening call...",
                 Toast.LENGTH_SHORT
             ).show()
         } catch (e: Exception) {
             Log.e(TAG, "Toast error: ${e.message}")
-        }
-
-        // Check if blocking is enabled by user settings
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val isBlockingEnabled = prefs.getBoolean("blocking_enabled", true)
-
-        if (!isBlockingEnabled) {
-            Log.e(TAG, "Blocking is disabled in settings. Allowing call.")
-            allowCall(callDetails)
-            return
         }
 
         val callerName = callDetails.callerDisplayName?.lowercase() ?: ""

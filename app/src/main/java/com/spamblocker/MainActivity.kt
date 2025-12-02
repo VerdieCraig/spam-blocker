@@ -39,6 +39,12 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == RESULT_OK) {
             Log.e(TAG, "User granted call screening role!")
             markRoleRequested()
+
+            // IMPORTANT: Set blocking enabled to TRUE by default when role is granted
+            getSharedPreferences(SpamCallScreeningService.PREFS_NAME, MODE_PRIVATE).edit {
+                putBoolean(SpamCallScreeningService.KEY_BLOCKING_ENABLED, true)
+            }
+
             updateUIForRoleGranted()
             Toast.makeText(this, "Call screening activated! Spam blocking is now active.", Toast.LENGTH_LONG).show()
         } else {
@@ -74,17 +80,15 @@ class MainActivity : AppCompatActivity() {
             showBlockedCallsLog()
         }
 
-        // Check current status on app start and auto-request role if needed
-        checkCurrentStatus()
+        // Only check status once - onResume will be called automatically after onCreate
         autoRequestRoleIfNeeded()
-        updateStatus()
     }
 
     // NEW METHOD: Automatically request role if we don't have it and haven't asked recently
     private fun autoRequestRoleIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val hasRole = roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)
-            val hasRequestedBefore = getSharedPreferences("settings", MODE_PRIVATE)
+            val hasRequestedBefore = getSharedPreferences(SpamCallScreeningService.PREFS_NAME, MODE_PRIVATE)
                 .getBoolean(PREF_ROLE_REQUESTED, false)
 
             if (!hasRole && !hasRequestedBefore && roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
@@ -99,7 +103,7 @@ class MainActivity : AppCompatActivity() {
 
     // NEW METHOD: Mark that we've requested the role (to avoid spamming user)
     private fun markRoleRequested() {
-        getSharedPreferences("settings", MODE_PRIVATE).edit {
+        getSharedPreferences(SpamCallScreeningService.PREFS_NAME, MODE_PRIVATE).edit {
             putBoolean(PREF_ROLE_REQUESTED, true)
         }
     }
@@ -135,17 +139,24 @@ class MainActivity : AppCompatActivity() {
 
             // Enable the blocking switch
             enableSwitch.isEnabled = true
-            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-            val isBlockingEnabled = prefs.getBoolean("blocking_enabled", true)
 
+            // Use the same SharedPreferences as the service
+            val prefs = getSharedPreferences(SpamCallScreeningService.PREFS_NAME, MODE_PRIVATE)
+            val isBlockingEnabled = prefs.getBoolean(SpamCallScreeningService.KEY_BLOCKING_ENABLED, true) // Default TRUE
+
+            Log.e(TAG, "Current blocking state from prefs: $isBlockingEnabled")
+
+            // Set up the switch without triggering the listener
             enableSwitch.setOnCheckedChangeListener(null)
             enableSwitch.isChecked = isBlockingEnabled
+
+            // Now add the listener
             enableSwitch.setOnCheckedChangeListener { _, isChecked ->
-                getSharedPreferences("settings", MODE_PRIVATE).edit {
-                    putBoolean("blocking_enabled", isChecked)
+                Log.e(TAG, "User toggled blocking to: $isChecked")
+                getSharedPreferences(SpamCallScreeningService.PREFS_NAME, MODE_PRIVATE).edit {
+                    putBoolean(SpamCallScreeningService.KEY_BLOCKING_ENABLED, isChecked)
                 }
                 updateStatusText(isChecked)
-                Log.e(TAG, "Blocking enabled: $isChecked")
             }
 
             updateStatusText(isBlockingEnabled)
@@ -153,24 +164,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // NEW METHOD: Update UI when role is missing
     private fun updateUIForRoleMissing() {
         runOnUiThread {
             statusText.text = getString(R.string.setup_required_text)
             statusText.setTextColor(Color.RED)
+
+            // CRITICAL: Clear listener before changing switch state
+            enableSwitch.setOnCheckedChangeListener(null)
             enableSwitch.isEnabled = false
             enableSwitch.isChecked = false
+
             setupButton.visibility = View.VISIBLE
         }
     }
 
-    // NEW METHOD: Update UI for unsupported Android version
     private fun updateUIForUnsupportedAndroid() {
         runOnUiThread {
             statusText.text = getString(R.string.screening_requires_android10)
             statusText.setTextColor(Color.GRAY)
+
+            // CRITICAL: Clear listener before changing switch state
+            enableSwitch.setOnCheckedChangeListener(null)
             enableSwitch.isEnabled = false
             enableSwitch.isChecked = false
+
             setupButton.visibility = View.VISIBLE
             setupButton.isEnabled = false
         }
@@ -247,7 +264,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Check role status when app comes to foreground
+        // Check role status when app comes to foreground and sync UI with actual state
         checkCurrentStatus()
     }
 
